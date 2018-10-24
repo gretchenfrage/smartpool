@@ -1,0 +1,11 @@
+[package]
+name = "smartpool"
+version = "0.1.0"
+authors = ["Phoenix <kahlo.phoenix@gmail.com>"]
+
+[dependencies]
+futures = "0.1.24"
+atom = "0.3.5"
+atomicmonitor = "0.1.1"
+monitor = "0.1.0"
+time = "0.1"
