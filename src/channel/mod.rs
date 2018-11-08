@@ -9,6 +9,8 @@ use atomicmonitor::atomic::{Atomic, Ordering};
 
 use futures::Future;
 
+pub mod mtree;
+
 /// A channel by which futures becomes available to the thread pool.
 pub trait Channel {
     fn assign_bits(&mut self, assigner: &mut BitAssigner) -> Result<(), NotEnoughBits>;
@@ -128,7 +130,7 @@ impl Exec for VecDequeChannel {
 impl Channel for VecDequeChannel {
     fn assign_bits(&mut self, assigner: &mut BitAssigner) -> Result<(), NotEnoughBits> {
         assigner.assign(&mut self.bit)?;
-        self.bit.set(self.queue.get_mut().unwrap().is_empty());
+        self.bit.set(!self.queue.get_mut().unwrap().is_empty());
         Ok(())
     }
 

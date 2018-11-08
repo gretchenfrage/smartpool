@@ -505,8 +505,8 @@ fn timer_and_yield_test() {
     owned.close().wait().unwrap();
     let end = SteadyTime::now();
 
-    // make assert that the time this took was less than 5 seconds
-    // allowing a 3 second overhead for only 1000 tasks is pretty generous
+    // assert that the time this took was less than 10 seconds
+    // allowing a 5 second overhead for only 1000 tasks is pretty generous
     // this is really just to assert that the pool is not blocking on yielding tasks
     assert!((end - start) < Duration::seconds(10));
 

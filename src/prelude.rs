@@ -44,6 +44,7 @@ pub mod setup {
         ExecParam,
         Channel
     };
+    pub use channel::mtree::MTreeChannel;
     pub use scoped::{
         scoped,
         Scope,

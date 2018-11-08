@@ -94,14 +94,14 @@ impl<Behavior: PoolBehavior> Deref for Pool<Behavior> {
 }
 
 #[derive(Debug)]
-pub enum NewPoolFailure {
+pub enum NewPoolError {
     Over64Channels,
     InvalidChannelIndex,
 }
 
 impl<Behavior: PoolBehavior> OwnedPool<Behavior> {
     /// Create and start a new pool
-    pub fn new(mut behavior: Behavior) -> Result<Self, NewPoolFailure> {
+    pub fn new(mut behavior: Behavior) -> Result<Self, NewPoolError> {
         let config = behavior.config();
 
         let mut levels = Vec::new();
@@ -130,7 +130,7 @@ impl<Behavior: PoolBehavior> OwnedPool<Behavior> {
                 // assign status bits
                 let bit_from = bit_assigner.current_index();
                 behavior.touch_channel_mut(channel_params.key, AssignChannelBits(&mut bit_assigner))
-                    .map_err(|_| NewPoolFailure::Over64Channels)?;
+                    .map_err(|_| NewPoolError::Over64Channels)?;
                 let bit_until = bit_assigner.current_index();
 
                 // add to the level mask
@@ -366,7 +366,7 @@ fn close<Behavior: PoolBehavior>(pool: Arc<Pool<Behavior>>) {
                     // if all shutdown channels are empty, exit the close loop
                     break 'close;
                 } else if (pool.present_field.get() & pool.complete_shutdown_mask & level.mask) == 0x0 {
-                    // if all channels in the level are empty, skip this close pass, , to avoid getting stuck
+                    // if all channels in the level are empty, skip this close pass, to avoid getting stuck
                     // in the find task loop
                     continue 'close;
                 }

@@ -12,6 +12,8 @@ extern crate futures;
 extern crate atom;
 extern crate monitor;
 extern crate time;
+// TODO: only if on nightly
+extern crate manhattan_tree;
 
 pub mod channel;
 pub mod pool;
@@ -25,6 +27,8 @@ pub mod test;
 use channel::Channel;
 
 use std::sync::Arc;
+use std::fmt::{Debug, Formatter};
+use std::fmt;
 
 use atomicmonitor::AtomMonitor;
 use atomicmonitor::atomic::{Atomic, Ordering};
@@ -43,6 +47,11 @@ impl RunningTask {
             spawn: spawn(Box::new(future)),
             close_counted: Atomic::new(false),
         }
+    }
+}
+impl Debug for RunningTask {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        f.write_str("RunningTask")
     }
 }
 
@@ -79,7 +88,7 @@ impl StatusBit {
 
     pub fn set(&self, value: bool) {
         if let Some(ref inner) = self.inner {
-            let _field_value = if value {
+            if value {
                 inner.monitor.mutate(|field| {
                     field.fetch_or(inner.mask, Ordering::SeqCst)
                 })
