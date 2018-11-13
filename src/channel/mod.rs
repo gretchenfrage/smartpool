@@ -9,8 +9,6 @@ use atomicmonitor::atomic::{Atomic, Ordering};
 
 use futures::Future;
 
-pub mod mtree;
-
 /// A channel by which futures becomes available to the thread pool.
 pub trait Channel {
     fn assign_bits(&mut self, assigner: &mut BitAssigner) -> Result<(), NotEnoughBits>;

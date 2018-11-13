@@ -55,12 +55,13 @@ impl Scheduler {
     /// scheduled for the same time.
     fn insert(&self, time: SteadyTime, event: ScheduledEvent) {
         self.tasks.with_lock(|mut tasks| {
-            match tasks.get_mut(&time) {
+            if let Some(to_insert) = match tasks.get_mut(&time) {
                 None => {
-                    tasks.insert(time, event);
+                    Some(event)
                 },
                 Some(&mut ScheduledEvent::Multiple(ref mut vec)) => {
                     vec.push(event);
+                    None
                 },
                 Some(a) => {
                     // turn the single scheduled event into a variant containing a vector of both
@@ -71,8 +72,11 @@ impl Scheduler {
                     } else {
                         unreachable!()
                     }
+                    None
                 }
-            };
+            } {
+                tasks.insert(time, to_insert);
+            }
             tasks.notify_all();
         })
     }
@@ -181,7 +185,12 @@ struct SubmitExec<E: Exec + Send + 'static> {
 }
 impl<E: Exec + Send + 'static> Submit for SubmitExec<E> {
     fn submit(self: Box<Self>) {
-        self.exec.submit(self.task);
+        let unboxed = *self;
+        let SubmitExec {
+            task,
+            exec
+        } = unboxed;
+        exec.submit(task);
     }
 }
 
@@ -195,7 +204,13 @@ impl<E: ExecParam + Send + 'static> Submit for SubmitExecParam<E>
     where E::Param: Send + 'static {
 
     fn submit(self: Box<Self>) {
-        self.exec.submit(self.task, self.param);
+        let unboxed = *self;
+        let SubmitExecParam {
+            task,
+            exec,
+            param
+        } = unboxed;
+        exec.submit(task, param);
     }
 }
 

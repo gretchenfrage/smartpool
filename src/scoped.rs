@@ -16,7 +16,8 @@ pub fn scoped<'env, R>(operation: impl FnOnce(&Scope<'env>) -> R) -> R {
     // create scope
     let scope = Scope {
         running_count: Arc::new(AtomMonitor::new(0)),
-        phantom: PhantomData,
+        not_static: PhantomData,
+        not_sendsync: PhantomData,
     };
 
     // trigger the futures
@@ -33,10 +34,9 @@ pub fn scoped<'env, R>(operation: impl FnOnce(&Scope<'env>) -> R) -> R {
 /// static futures, which prevent this the batch stack frame from exiting until they complete.
 pub struct Scope<'env> {
     running_count: Arc<AtomMonitor<usize>>,
-    phantom: PhantomData<&'env ()>,
+    not_static: PhantomData<&'env ()>,
+    not_sendsync: PhantomData<*const ()>,
 }
-impl<'env> !Send for Scope<'env> {}
-impl<'env> !Sync for Scope<'env> {}
 impl<'env> Scope<'env> {
     /// Wrap a non-static future into a static-future (which will block this scoped batch
     /// stack frame), allowing that future to be submitted to a threadpool.

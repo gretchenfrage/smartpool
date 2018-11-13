@@ -1,7 +1,3 @@
-#![feature(try_from)]
-#![feature(nll)]
-#![feature(optin_builtin_traits)]
-
 ///
 /// The Phoenix Kahlo design for an intelligently prioritized threadpool system, particularly
 /// for video games, based on the atomic monitor, with future awareness.
@@ -12,8 +8,6 @@ extern crate futures;
 extern crate atom;
 extern crate monitor;
 extern crate time;
-// TODO: only if on nightly
-extern crate manhattan_tree;
 
 pub mod channel;
 pub mod pool;

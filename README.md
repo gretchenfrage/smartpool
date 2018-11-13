@@ -19,7 +19,6 @@ of the pool.
   * Round-robin scheduler
 * More channel prioritization schemes
   * Scalar priority
-  * Spatially priority
   * Shortest deadline first
 * Formal performance tests
 

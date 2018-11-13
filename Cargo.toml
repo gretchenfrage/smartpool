@@ -9,4 +9,3 @@ atom = "0.3.5"
 atomicmonitor = "0.1.1"
 monitor = "0.1.0"
 time = "0.1"
-manhattan-tree = { path = "../manhattan-tree" }

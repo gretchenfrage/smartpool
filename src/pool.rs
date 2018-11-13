@@ -110,62 +110,62 @@ impl<Behavior: PoolBehavior> OwnedPool<Behavior> {
 
         let present_field = Arc::new(AtomMonitor::new(0));
         let mut current_bit = 0;
-        let mut bit_assigner = BitAssigner::new(&present_field, &mut current_bit);
 
-        // build each level, both normal and shutdown simultaneously
-        for &PriorityLevel(ref channel_param_vec) in &config.levels {
-            let mut level = Level {
-                mask: 0,
-                channel_index: Atomic::new(0),
-                channels: Vec::new(),
-            };
-            let mut level_shutdown = Level {
-                mask: 0,
-                channel_index: Atomic::new(0),
-                channels: Vec::new(),
-            };
+        {
+            let mut bit_assigner = BitAssigner::new(&present_field, &mut current_bit);
+            // build each level, both normal and shutdown simultaneously
+            for &PriorityLevel(ref channel_param_vec) in &config.levels {
+                let mut level = Level {
+                    mask: 0,
+                    channel_index: Atomic::new(0),
+                    channels: Vec::new(),
+                };
+                let mut level_shutdown = Level {
+                    mask: 0,
+                    channel_index: Atomic::new(0),
+                    channels: Vec::new(),
+                };
 
-            // loop through each channel in the level
-            for channel_params in channel_param_vec {
-                // assign status bits
-                let bit_from = bit_assigner.current_index();
-                behavior.touch_channel_mut(channel_params.key, AssignChannelBits(&mut bit_assigner))
-                    .map_err(|_| NewPoolError::Over64Channels)?;
-                let bit_until = bit_assigner.current_index();
+                // loop through each channel in the level
+                for channel_params in channel_param_vec {
+                    // assign status bits
+                    let bit_from = bit_assigner.current_index();
+                    behavior.touch_channel_mut(channel_params.key, AssignChannelBits(&mut bit_assigner))
+                        .map_err(|_| NewPoolError::Over64Channels)?;
+                    let bit_until = bit_assigner.current_index();
 
-                // add to the level mask
-                let mut channel_mask: u64 = 0;
-                for bit in bit_from..bit_until {
-                    channel_mask |= 0x1 << bit;
-                }
-                level.mask |= channel_mask;
+                    // add to the level mask
+                    let mut channel_mask: u64 = 0;
+                    for bit in bit_from..bit_until {
+                        channel_mask |= 0x1 << bit;
+                    }
+                    level.mask |= channel_mask;
 
-                // add to the channel vec
-                level.channels.push(ChannelIdentifier {
-                    key: channel_params.key,
-                    mask: channel_mask
-                });
-
-                // possibly repeat for shutdown
-                if channel_params.complete_on_close {
-                    level_shutdown.mask |= channel_mask;
-                    level_shutdown.channels.push(ChannelIdentifier {
+                    // add to the channel vec
+                    level.channels.push(ChannelIdentifier {
                         key: channel_params.key,
-                        mask: channel_mask,
+                        mask: channel_mask
                     });
 
-                    // also add to the complete shutdown mask
-                    complete_shutdown_mask |= channel_mask;
+                    // possibly repeat for shutdown
+                    if channel_params.complete_on_close {
+                        level_shutdown.mask |= channel_mask;
+                        level_shutdown.channels.push(ChannelIdentifier {
+                            key: channel_params.key,
+                            mask: channel_mask,
+                        });
+
+                        // also add to the complete shutdown mask
+                        complete_shutdown_mask |= channel_mask;
+                    }
                 }
+
+                // the new level is built
+                levels.push(level);
+                levels_shutdown.push(level_shutdown);
             }
-
-            // the new level is built
-            levels.push(level);
-            levels_shutdown.push(level_shutdown);
+            // release the borrow of present field
         }
-
-        // release the borrow of present field
-        mem::drop(bit_assigner);
 
         // create the shared pool struct
         let pool = Arc::new(Pool {
@@ -508,8 +508,8 @@ mod run {
     }
 }
 
-struct AssignChannelBits<'a, 'b, 'c>(&'a mut BitAssigner<'b, 'c>);
-impl<'a, 'b, 'c> ChannelToucherMut<Result<(), NotEnoughBits>> for AssignChannelBits<'a, 'b, 'c> {
+struct AssignChannelBits<'a, 'b: 'a, 'c: 'a>(&'a mut BitAssigner<'b, 'c>);
+impl<'a, 'b: 'a, 'c: 'a> ChannelToucherMut<Result<(), NotEnoughBits>> for AssignChannelBits<'a, 'b, 'c> {
     fn touch_mut(&mut self, channel: &mut impl Channel) -> Result<(), NotEnoughBits> {
         let &mut AssignChannelBits(ref mut assigner) = self;
         channel.assign_bits(assigner)
