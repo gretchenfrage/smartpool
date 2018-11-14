@@ -32,7 +32,7 @@ impl Channel for ShortestDeadlineFirst {
 
     fn poll(&self) -> Option<RunningTask> {
         let mut tree = self.tree.lock().unwrap();
-        let (remove, elem) = match tree.iter_mut().next_back() {
+        let (remove, elem) = match tree.iter_mut().next() {
             Some((key, mut queue)) => {
                 let elem = queue.remove();
                 let remove = if queue.is_empty() {
