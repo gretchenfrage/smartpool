@@ -5,7 +5,7 @@ extern crate pretty_env_logger;
 use ::prelude::*;
 use self::rand::prelude::*;
 use self::rand::XorShiftRng;
-use self::stopwatch::Stopwatch;
+use stopwatch::Stopwatch;
 use atomic::{Atomic, Ordering};
 use time::{Duration, SteadyTime};
 
@@ -31,6 +31,7 @@ mod sdf_pool {
         fn config(&mut self) -> PoolConfig<Self> {
             PoolConfig {
                 threads: 1,
+                schedule: ScheduleAlgorithm::HighestFirst,
                 levels: vec![PriorityLevel(vec![ChannelParams {
                     key: (),
                     complete_on_close: false,

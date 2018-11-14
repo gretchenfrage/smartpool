@@ -21,15 +21,10 @@ pub fn init_log() {
 
 struct OneChannelPool<C: Channel + Exec + Send + Sync + 'static> {
     thread_count: u32,
-    channel: C
+    schedule: ScheduleAlgorithm,
+    channel: C,
 }
 impl<C: Channel + Exec + Send + Sync + 'static> OneChannelPool<C> {
-    fn new(thread_count: u32, channel: C) -> Self {
-        OneChannelPool {
-            thread_count,
-            channel
-        }
-    }
 }
 impl<C: Channel + Exec + Send + Sync + 'static> PoolBehavior for OneChannelPool<C> {
     type ChannelKey = ();
@@ -37,6 +32,7 @@ impl<C: Channel + Exec + Send + Sync + 'static> PoolBehavior for OneChannelPool<
     fn config(&mut self) -> PoolConfig<Self> {
         PoolConfig {
             threads: self.thread_count,
+            schedule: self.schedule.clone(),
             levels: vec![
                 PriorityLevel(vec![
                     ChannelParams {
@@ -65,7 +61,40 @@ impl<C: Channel + Exec + Send + Sync + 'static> PoolBehavior for OneChannelPool<
 #[test]
 fn simple_threadpool_test() {
     init_log();
-    let owned = OwnedPool::new(OneChannelPool::new(8, VecDequeChannel::new())).unwrap();
+    let owned = OwnedPool::new(OneChannelPool {
+        thread_count: 8,
+        schedule: ScheduleAlgorithm::HighestFirst,
+        channel: VecDequeChannel::new()
+    }).unwrap();
+    let count = Arc::new(Monitor::new(0));
+
+    for _ in 0..100 {
+        let count = count.clone();
+        owned.pool.channel.exec(run(move || count.with_lock(|mut guard| {
+            *guard += 1;
+            guard.notify_all();
+        })));
+    }
+
+    let result = count.with_lock(|mut guard| {
+        let end = SteadyTime::now() + Duration::seconds(15);
+        while *guard < 100 && SteadyTime::now() < end {
+            guard.wait_timeout(Duration::seconds(1).to_std().unwrap());
+        }
+        *guard
+    });
+    assert_eq!(result, 100);
+}
+
+/// Tests that the threadpool can execute a series of tasks with the round robin scheduler.
+#[test]
+fn simple_threadpool_test_round_robin() {
+    init_log();
+    let owned = OwnedPool::new(OneChannelPool {
+        thread_count: 8,
+        schedule: ScheduleAlgorithm::RoundRobin(vec![Duration::milliseconds(50)]),
+        channel: VecDequeChannel::new()
+    }).unwrap();
     let count = Arc::new(Monitor::new(0));
 
     for _ in 0..100 {
@@ -96,6 +125,7 @@ impl PoolBehavior for CompleteOnCloseTestPool {
     fn config(&mut self) -> PoolConfig<Self> {
         PoolConfig {
             threads: 4,
+            schedule: ScheduleAlgorithm::HighestFirst,
             levels: vec![
                 PriorityLevel(vec![
                     ChannelParams {
@@ -239,6 +269,7 @@ impl PoolBehavior for MultiLevelPool {
     fn config(&mut self) -> PoolConfig<Self> {
         PoolConfig {
             threads: 4,
+            schedule: ScheduleAlgorithm::HighestFirst,
             levels: vec![
                 PriorityLevel(vec![
                     ChannelParams {
@@ -457,6 +488,7 @@ impl PoolBehavior for TooManyBits {
     fn config(&mut self) -> PoolConfig<Self> {
         PoolConfig {
             threads: 1,
+            schedule: ScheduleAlgorithm::HighestFirst,
             levels: vec![
                 PriorityLevel(vec![
                     ChannelParams {
@@ -493,10 +525,11 @@ fn fail_on_too_many_bits() {
 fn timer_and_yield_test() {
     init_log();
     let owned =
-        OwnedPool::new(OneChannelPool::new(
-            4,
-            VecDequeChannel::new().into_shared()
-        )).unwrap();
+        OwnedPool::new(OneChannelPool {
+            thread_count: 4,
+            schedule: ScheduleAlgorithm::HighestFirst,
+            channel: VecDequeChannel::new().into_shared()
+        }).unwrap();
     let scheduler = TimeScheduler::new();
 
     // create 1000 sleep routines
@@ -530,10 +563,11 @@ fn timer_and_yield_test() {
 #[test]
 fn scoped_op_test() {
     init_log();
-    let owned = OwnedPool::new(OneChannelPool::new(
-        4,
-        VecDequeChannel::new()
-    )).unwrap();
+    let owned = OwnedPool::new(OneChannelPool {
+        thread_count: 4,
+        schedule: ScheduleAlgorithm::HighestFirst,
+        channel: VecDequeChannel::new()
+    }).unwrap();
     let scheduler = TimeScheduler::new();
 
     let atom = Atomic::new(0usize);

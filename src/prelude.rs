@@ -30,7 +30,8 @@ pub mod setup {
         ChannelParams,
         ChannelToucher,
         ChannelToucherMut,
-        RunningTask
+        RunningTask,
+        ScheduleAlgorithm,
     };
     pub use pool::{
         OwnedPool
