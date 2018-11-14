@@ -14,12 +14,12 @@ use futures::task::Task;
 
 /// A thread that schedules events to occur in the future.
 #[derive(Clone)]
-pub struct Scheduler {
+pub struct TimeScheduler {
     tasks: Arc<Monitor<BTreeMap<SteadyTime, ScheduledEvent>>>
 }
-impl Scheduler {
+impl TimeScheduler {
     pub fn new() -> Self {
-        let scheduler = Scheduler {
+        let scheduler = TimeScheduler {
             tasks: Arc::new(Monitor::new(BTreeMap::new()))
         };
         let tasks = scheduler.tasks.clone();
@@ -216,7 +216,7 @@ impl<E: ExecParam + Send + 'static> Submit for SubmitExecParam<E>
 
 /// A future that is scheduled to occur at a moment in the future.
 pub struct FutureMoment {
-    scheduler: Option<Scheduler>,
+    scheduler: Option<TimeScheduler>,
     moment: SteadyTime,
 }
 impl Future for FutureMoment {
@@ -237,7 +237,7 @@ impl Future for FutureMoment {
 
 /// A stream that produces values at a continuous interval.
 pub struct PeriodicMoments {
-    scheduler: Scheduler,
+    scheduler: TimeScheduler,
     current: SteadyTime,
     period: Duration,
 }

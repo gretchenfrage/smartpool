@@ -4,6 +4,8 @@
 /// for video games, based on the atomic monitor, with future awareness.
 ///
 
+#[macro_use]
+extern crate log;
 extern crate atomicmonitor;
 extern crate futures;
 extern crate atom;
@@ -11,15 +13,14 @@ extern crate monitor;
 extern crate time;
 extern crate smallqueue;
 extern crate atomic;
-#[macro_use]
-extern crate log;
+extern crate stopwatch;
 
 pub mod channel;
 pub mod pool;
 pub mod prelude;
 pub mod run;
 pub mod scoped;
-pub mod scheduler;
+pub mod timescheduler;
 #[cfg(test)]
 pub mod test;
 
@@ -34,6 +35,8 @@ use atomicmonitor::atomic::{Atomic, Ordering};
 
 use futures::Future;
 use futures::executor::{spawn, Spawn};
+
+use time::Duration;
 
 /// The form a future exists in while it is being executed
 pub struct RunningTask {
@@ -128,8 +131,20 @@ pub trait ChannelToucherMut<O>: Sized {
 pub struct PoolConfig<Behavior: PoolBehavior> {
     /// Worker thread count
     pub threads: u32,
+    /// Schedule algorithm
+    pub schedule: ScheduleAlgorithm,
     /// Priority levels, from highest to lowest
     pub levels: Vec<PriorityLevel<Behavior>>,
+}
+
+/// Different schedules by which the thread pool can be configured to select between levels.
+#[derive(Clone, Debug)]
+pub enum ScheduleAlgorithm {
+    /// Always run the highest level at which there is a task.
+    HighestFirst,
+    /// Rotate between the schedule levels, round-robin, giving each level a certain
+    /// duration of time slice.
+    RoundRobin(Vec<Duration>)
 }
 
 /// All the channels in a level

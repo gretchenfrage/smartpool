@@ -1,6 +1,6 @@
 
 use super::{PoolBehavior, PriorityLevel, ChannelToucher,
-            ChannelToucherMut, RunningTask};
+            ChannelToucherMut, RunningTask, ScheduleAlgorithm};
 use channel::{Channel, BitAssigner, NotEnoughBits};
 
 use std::sync::Arc;
@@ -10,6 +10,7 @@ use std::thread;
 use std::ops::Deref;
 use std::mem;
 use std::any::Any;
+use std::time::Duration as StdDuration;
 
 use atomicmonitor::AtomMonitor;
 use atomicmonitor::atomic::{Atomic, Ordering};
@@ -19,6 +20,8 @@ use futures::{task, Async};
 use futures::future::Future;
 use futures::executor::{Notify, NotifyHandle};
 use monitor::Monitor;
+use time::Duration;
+use stopwatch::Stopwatch;
 
 /// The shared pool data.
 pub struct Pool<Behavior: PoolBehavior> {
@@ -97,6 +100,14 @@ impl<Behavior: PoolBehavior> Deref for Pool<Behavior> {
 pub enum NewPoolError {
     Over64Channels,
     InvalidChannelIndex,
+    WrongNumberTimeslices {
+        num_levels: usize,
+        num_timeslices: usize,
+    },
+    NegativeTimeSlice {
+        index: usize,
+        duration: Duration,
+    }
 }
 
 impl<Behavior: PoolBehavior> OwnedPool<Behavior> {
@@ -167,6 +178,19 @@ impl<Behavior: PoolBehavior> OwnedPool<Behavior> {
             // release the borrow of present field
         }
 
+        // verify the scheduler algorithm's validity
+        match config.schedule {
+            ScheduleAlgorithm::HighestFirst => (),
+            ScheduleAlgorithm::RoundRobin(ref time_slices) => {
+                if time_slices.len() != levels.len() {
+                    return Err(NewPoolError::WrongNumberTimeslices {
+                        num_levels: levels.len(),
+                        num_timeslices: time_slices.len(),
+                    });
+                }
+            }
+        };
+
         // create the shared pool struct
         let pool = Arc::new(Pool {
             behavior,
@@ -179,12 +203,53 @@ impl<Behavior: PoolBehavior> OwnedPool<Behavior> {
         });
 
         // spawn the workers
+        /*
         let mut workers = Vec::new();
         for _ in 0..config.threads {
             let pool = pool.clone();
-            let worker = thread::spawn(move || work(pool));
+            let worker = match config.schedule {
+                ScheduleAlgorithm::HighestFirst =>
+                    thread::spawn(move || work_highest_first(pool)),
+                ScheduleAlgorithm::RoundRobin(ref time_slices) => {
+                    let time_slices = time_slices.clone();
+                    thread::spawn(move || work_round_robin(pool, time_slices))
+                },
+            };
             workers.push(worker);
         }
+        */
+
+        let mut workers = Vec::new();
+        match config.schedule {
+            ScheduleAlgorithm::HighestFirst => {
+                for _ in 0..config.threads {
+                    let pool = pool.clone();
+                    let worker = thread::spawn(move || work_highest_first(pool));
+                    workers.push(worker);
+                }
+            },
+            ScheduleAlgorithm::RoundRobin(time_slices) => {
+                // convert time slices into std duration
+                let mut std_time_slices = Vec::new();
+                for (i, duration) in time_slices.into_iter().enumerate() {
+                    match duration.to_std() {
+                        Ok(std_duration) => {
+                            std_time_slices.push(std_duration);
+                        },
+                        Err(_) => {
+                            return Err(NewPoolError::NegativeTimeSlice {
+                                index: i,
+                                duration,
+                            });
+                        }
+                    };
+                }
+
+                let pool = pool.clone();
+                let worker = thread::spawn(move || work_round_robin(pool, std_time_slices));
+                workers.push(worker);
+            }
+        };
 
         Ok(OwnedPool {
             pool,
@@ -265,7 +330,7 @@ impl Future for PoolClose {
     }
 }
 
-fn work<Behavior: PoolBehavior>(pool: Arc<Pool<Behavior>>) {
+fn work_highest_first<Behavior: PoolBehavior>(pool: Arc<Pool<Behavior>>) {
     // the main work loop
     'work: while pool.lifecycle_state.load(Ordering::Acquire) == LifecycleState::Running {
 
@@ -316,6 +381,95 @@ fn work<Behavior: PoolBehavior>(pool: Arc<Pool<Behavior>>) {
     close(pool);
 }
 
+fn work_round_robin<Behavior: PoolBehavior>(pool: Arc<Pool<Behavior>>, time_slices: Vec<StdDuration>) {
+    // the main work loop
+    'work: while pool.lifecycle_state.load(Ordering::Acquire) == LifecycleState::Running {
+
+        // block until there is a task to run or the pool is closing
+        pool.present_field.wait_until(|field| {
+            field != 0x0 ||
+                pool.lifecycle_state.load(Ordering::Acquire) != LifecycleState::Running
+        });
+
+        // iterate through the levels
+        'levels: for (level_index, level) in pool.levels.iter().enumerate() {
+            // start a timer for this level
+            let timer = Stopwatch::start_new();
+
+            // until either:
+            while
+                !({
+                    // the level is empty
+                    (pool.present_field.get() & level.mask) == 0x0
+                } || {
+                    // the stopwatch runs out
+                    timer.elapsed() >= time_slices[level_index]
+                } || {
+                    // or the pool is closing
+                    pool.lifecycle_state.load(Ordering::Acquire) != LifecycleState::Running
+                }) {
+
+                // wait until **any** channel has contents, or the stopwatch expires
+                let remaining_time = Duration::from_std(time_slices[level_index]).unwrap() -
+                    Duration::from_std(timer.elapsed()).unwrap();
+                pool.present_field.wait_until_timeout(
+                    |mask| mask != 0x0,
+                    remaining_time
+                );
+
+                // if the pool is closing, break out of the work loop, to avoid getting stuck
+                // in the find task loop
+                if pool.lifecycle_state.load(Ordering::Acquire) != LifecycleState::Running {
+                    break 'work;
+                }
+
+                // else, if the timer has expired, or this level is empty (but another level isn't
+                // empty), continue to the next level
+                if timer.elapsed() >= time_slices[level_index] ||
+                    (pool.present_field.get() & level.mask) == 0x0 {
+                    continue 'levels;
+                }
+
+                // otherwise, attempt to extract a task from the level, or jump to some other code point
+                let (task, from) = 'find_task: loop {
+                    // get a channel index
+                    let level_channel_index = level.channel_index.fetch_add(1, Ordering::SeqCst)
+                        % level.channels.len();
+                    let channel_identifier = level.channels[level_channel_index];
+
+                    // attempt to extract a task from that channel, and break the loop with it
+                    if let Some(task) = pool.behavior.touch_channel(channel_identifier.key, PollChannel) {
+                        break 'find_task (task, channel_identifier);
+                    }
+
+                    // else, if the whole level is empty, skip this work pass, to avoid getting stuck
+                    // in the find task loop
+                    if (pool.present_field.get() & level.mask) == 0x0 {
+                        continue 'levels;
+                    }
+
+                    // else, if the pool is closing, break out of the work loop, to avoid getting stuck
+                    // in the find task loop
+                    if pool.lifecycle_state.load(Ordering::Acquire) != LifecycleState::Running {
+                        break 'work;
+                    }
+
+                    // else, do another find task pass
+                };
+
+                // now that a task was successfully acquired, run it, then repeat
+                run::run(&pool, task, from);
+            }
+        }
+    }
+
+    // now that the pool is closing, properly run the close procedure
+    close(pool);
+}
+
+/// Highest-first close pool routine.
+/// To manage code complexity, this is the close behavior for all pools, regardless of its
+/// schedule algorithm while it's running.
 fn close<Behavior: PoolBehavior>(pool: Arc<Pool<Behavior>>) {
     // to determine whether we should break the close loop, all shutdown channels must be empty
     // but also, we must wait for externally blocked close-critical tasks to complete

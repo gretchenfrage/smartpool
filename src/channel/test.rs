@@ -1,6 +1,5 @@
 
 extern crate rand;
-extern crate stopwatch;
 extern crate pretty_env_logger;
 
 use ::prelude::*;

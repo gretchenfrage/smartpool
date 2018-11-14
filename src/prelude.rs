@@ -9,9 +9,7 @@ pub use channel::{
     Exec,
     ExecParam,
 };
-pub use scheduler::{
-    Scheduler,
-};
+pub use timescheduler::TimeScheduler;
 pub use run::{
     run,
     try

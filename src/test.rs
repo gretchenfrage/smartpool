@@ -497,7 +497,7 @@ fn timer_and_yield_test() {
             4,
             VecDequeChannel::new().into_shared()
         )).unwrap();
-    let scheduler = Scheduler::new();
+    let scheduler = TimeScheduler::new();
 
     // create 1000 sleep routines
     for _ in 0..1000 {
@@ -534,7 +534,7 @@ fn scoped_op_test() {
         4,
         VecDequeChannel::new()
     )).unwrap();
-    let scheduler = Scheduler::new();
+    let scheduler = TimeScheduler::new();
 
     let atom = Atomic::new(0usize);
     scoped(|s| {

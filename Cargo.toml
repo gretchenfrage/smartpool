@@ -12,9 +12,9 @@ time = "0.1"
 smallqueue = { path = "../smallqueue" }
 atomic = "0.4.1"
 log = "0.4.6"
+stopwatch = "0.0.7"
 
 [dev-dependencies]
 rand = "0.5.5"
-stopwatch = "0.0.7"
 pretty_env_logger = "0.2.5"
 
