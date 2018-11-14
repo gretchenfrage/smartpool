@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use std::thread::sleep;
 use std::sync::{Once, ONCE_INIT};
+use std::thread;
 
 use time::{SteadyTime, Duration};
 use futures::prelude::*;
@@ -584,4 +585,139 @@ fn scoped_op_test() {
     let value = atom.load(Ordering::Acquire);
 
     assert_eq!(value, 1000);
+}
+
+mod rrp {
+    use ::prelude::setup::*;
+    use time::Duration;
+
+    #[derive(Copy, Clone)]
+    pub enum RoundRobinPoolKey {
+        A,
+        B,
+        C,
+    }
+
+    pub struct RoundRobinPool {
+        pub a: VecDequeChannel,
+        pub b: VecDequeChannel,
+        pub c: VecDequeChannel,
+    }
+    impl RoundRobinPool {
+        pub fn new() -> Self {
+            RoundRobinPool {
+                a: VecDequeChannel::new(),
+                b: VecDequeChannel::new(),
+                c: VecDequeChannel::new(),
+            }
+        }
+    }
+    impl PoolBehavior for RoundRobinPool {
+        type ChannelKey = RoundRobinPoolKey;
+
+        fn config(&mut self) -> PoolConfig<Self> {
+            PoolConfig {
+                threads: 4,
+                schedule: ScheduleAlgorithm::RoundRobin(vec![
+                    Duration::milliseconds(20),
+                    Duration::milliseconds(40),
+                    Duration::milliseconds(60),
+                ]),
+                levels: vec![
+                    PriorityLevel(vec![ChannelParams {
+                        key: RoundRobinPoolKey::A,
+                        complete_on_close: false,
+                    }]),
+                    PriorityLevel(vec![ChannelParams {
+                        key: RoundRobinPoolKey::B,
+                        complete_on_close: false,
+                    }]),
+                    PriorityLevel(vec![ChannelParams {
+                        key: RoundRobinPoolKey::C,
+                        complete_on_close: false,
+                    }])
+                ]
+            }
+        }
+
+        fn touch_channel<O>(&self, key: RoundRobinPoolKey, mut toucher: impl ChannelToucher<O>) -> O {
+            match key {
+                RoundRobinPoolKey::A => toucher.touch(&self.a),
+                RoundRobinPoolKey::B => toucher.touch(&self.b),
+                RoundRobinPoolKey::C => toucher.touch(&self.c),
+            }
+        }
+
+        fn touch_channel_mut<O>(&mut self, key: RoundRobinPoolKey, mut toucher: impl ChannelToucherMut<O>) -> O {
+            match key {
+                RoundRobinPoolKey::A => toucher.touch_mut(&mut self.a),
+                RoundRobinPoolKey::B => toucher.touch_mut(&mut self.b),
+                RoundRobinPoolKey::C => toucher.touch_mut(&mut self.c),
+            }
+        }
+
+        fn followup(&self, from: RoundRobinPoolKey, task: RunningTask) {
+            match from {
+                RoundRobinPoolKey::A => self.a.submit(task),
+                RoundRobinPoolKey::B => self.b.submit(task),
+                RoundRobinPoolKey::C => self.c.submit(task),
+            }
+        }
+    }
+}
+
+/// Tests that the round-robin time slicing is more or less correct.
+#[test]
+fn test_slicing() {
+    init_log();
+    use self::rrp::*;
+
+    // create the round-robin pool
+    let owned = OwnedPool::new(RoundRobinPool::new()).unwrap();
+
+    // and an atomic counter for each level
+    let a = Arc::new(Atomic::new(0u64));
+    let b = Arc::new(Atomic::new(0u64));
+    let c = Arc::new(Atomic::new(0u64));
+
+    // trigger recursively self-reproducing tasks
+    // enqueue a whole bunch of tasks, a task on each channel which increments its corresponding
+    // counter
+    for _ in 0..1000000 {
+        let a = a.clone();
+        let b = b.clone();
+        let c = c.clone();
+        owned.pool.a.exec(run(move || {
+            a.fetch_add(1, Ordering::SeqCst);
+        }));
+        owned.pool.b.exec(run(move || {
+            b.fetch_add(1, Ordering::SeqCst);
+        }));
+        owned.pool.c.exec(run(move || {
+            c.fetch_add(1, Ordering::SeqCst);
+        }));
+    }
+
+    // wait a bit, then close the pool, which should cancel further tasks
+    thread::sleep(StdDuration::from_secs(2));
+    owned.close().wait().unwrap();
+
+    // then, check if the time slices are more or less accurate
+    let a = a.load(Ordering::Acquire);
+    let b = b.load(Ordering::Acquire);
+    let c = c.load(Ordering::Acquire);
+    let total = a + b + c;
+    info!("total tasks completed: {}, {}, {}", a, b, c);
+
+    let a_closeness = (a as f32 / total as f32) / (1.0 / 6.0);
+    let b_closeness = (b as f32 / total as f32) / (2.0 / 6.0);
+    let c_closeness = (c as f32 / total as f32) / (3.0 / 6.0);
+
+    let check = |n: f32| {
+        assert!(n > 0.9, "{} !> 0.9", n);
+        assert!(n < 1.1, "{} !< 1.1", n);
+    };
+    check(a_closeness);
+    check(b_closeness);
+    check(c_closeness);
 }

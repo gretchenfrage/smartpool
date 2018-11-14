@@ -6,7 +6,8 @@ authors = ["Phoenix <kahlo.phoenix@gmail.com>"]
 [dependencies]
 futures = "0.1.24"
 atom = "0.3.5"
-atomicmonitor = "0.1.1"
+#atomicmonitor = "0.1.1"
+atomicmonitor = { path = "../atomicmonitor" }
 monitor = "0.1.0"
 time = "0.1"
 smallqueue = { path = "../smallqueue" }
