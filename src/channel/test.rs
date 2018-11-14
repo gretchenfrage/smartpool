@@ -73,7 +73,7 @@ fn sdf_test() {
                 let op = scope.work(|| {
                     atomic.fetch_add(1, Ordering::SeqCst);
                 });
-                let delay = Duration::milliseconds((rng.gen::<u64>() % 5000) as i64);
+                let delay = Duration::milliseconds((rng.gen::<u64>() % 5000 + 5000) as i64);
                 let moment = SteadyTime::now() + delay;
                 pool.pool.deadline.exec(op, moment);
             }

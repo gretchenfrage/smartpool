@@ -34,6 +34,10 @@ impl Channel for ShortestDeadlineFirst {
         let mut tree = self.tree.lock().unwrap();
         let (remove, elem) = match tree.iter_mut().next() {
             Some((key, mut queue)) => {
+                if SteadyTime::now() > *key {
+                    warn!("task executing past deadline of {:?}", key);
+                }
+
                 let elem = queue.remove();
                 let remove = if queue.is_empty() {
                     Some(*key)
