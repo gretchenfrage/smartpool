@@ -1,4 +1,10 @@
 
+mod sdf;
+#[cfg(test)]
+mod test;
+
+pub use self::sdf::ShortestDeadlineFirst;
+
 use super::{StatusBit, RunningTask};
 
 use std::sync::{Mutex, RwLock, Arc};

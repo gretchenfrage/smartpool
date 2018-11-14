@@ -12,6 +12,8 @@ of the pool.
 * Partitioning task channels by their behavior when the pool closes
 * Scoped operations
 * Scheduled operations
+* Spatial prioritization, with the `smartpool-spatial` crate
+* Use on stable channel
 
 ### Planned features
 
@@ -20,6 +22,7 @@ of the pool.
 * More channel prioritization schemes
   * Scalar priority
   * Shortest deadline first
+* Associated thread state
 * Formal performance tests
 
 ### Example
