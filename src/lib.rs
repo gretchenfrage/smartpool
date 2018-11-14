@@ -11,6 +11,8 @@ extern crate monitor;
 extern crate time;
 extern crate smallqueue;
 extern crate atomic;
+#[macro_use]
+extern crate log;
 
 pub mod channel;
 pub mod pool;

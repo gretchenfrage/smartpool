@@ -1,14 +1,23 @@
+extern crate pretty_env_logger;
 
 use prelude::setup::*;
 
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use std::thread::sleep;
-use time::{SteadyTime, Duration};
+use std::sync::{Once, ONCE_INIT};
 
+use time::{SteadyTime, Duration};
 use futures::prelude::*;
 use atomicmonitor::atomic::{Atomic, Ordering};
 use monitor::Monitor;
+
+static INIT_LOG: Once = ONCE_INIT;
+pub fn init_log() {
+    INIT_LOG.call_once(|| {
+        pretty_env_logger::init();
+    });
+}
 
 struct OneChannelPool<C: Channel + Exec + Send + Sync + 'static> {
     thread_count: u32,
@@ -55,6 +64,7 @@ impl<C: Channel + Exec + Send + Sync + 'static> PoolBehavior for OneChannelPool<
 /// Tests that the threadpool can execute a series of tasks.
 #[test]
 fn simple_threadpool_test() {
+    init_log();
     let owned = OwnedPool::new(OneChannelPool::new(8, VecDequeChannel::new())).unwrap();
     let count = Arc::new(Monitor::new(0));
 
@@ -127,6 +137,7 @@ impl PoolBehavior for CompleteOnCloseTestPool {
 /// open channels are handled properly.
 #[test]
 fn close_test() {
+    init_log();
     let owned = OwnedPool::new(CompleteOnCloseTestPool {
         do_complete: VecDequeChannel::new(),
         do_not_complete: VecDequeChannel::new()
@@ -141,18 +152,18 @@ fn close_test() {
         let monitor_1 = monitor_1.clone();
         let counter_1 = counter_1.clone();
         owned.pool.do_not_complete.exec(run(move || monitor_1.with_lock(|mut guard| {
-            //println!("enter guard 1");
+            trace!("enter guard 1");
             let end = SteadyTime::now() + Duration::seconds(10);
             while !*guard && SteadyTime::now() < end {
                 guard.wait_timeout(StdDuration::from_secs(1));
             }
             counter_1.fetch_add(1, Ordering::SeqCst);
-            //println!("exit guard 1");
+            trace!("exit guard 1");
         })))
     }
 
     sleep(StdDuration::from_millis(500));
-    //println!("slept");
+    trace!("slept");
 
     // submit another 10 tasks to the do_complete channel
     let counter_2 = Arc::new(Monitor::new(0usize));
@@ -292,6 +303,7 @@ impl PoolBehavior for MultiLevelPool {
 
 #[test]
 fn multi_level_test() {
+    init_log();
     let owned = OwnedPool::new(MultiLevelPool::new()).unwrap();
 
     // submit 10 tasks to the alpha level, which are blocked
@@ -471,6 +483,7 @@ impl PoolBehavior for TooManyBits {
 
 #[test]
 fn fail_on_too_many_bits() {
+    init_log();
     assert!(OwnedPool::new(TooManyBits::new()).is_err());
 }
 
@@ -478,6 +491,7 @@ fn fail_on_too_many_bits() {
 /// Also tests that the shared channel mechanic works.
 #[test]
 fn timer_and_yield_test() {
+    init_log();
     let owned =
         OwnedPool::new(OneChannelPool::new(
             4,
@@ -515,6 +529,7 @@ fn timer_and_yield_test() {
 /// Tests that scoped operations work correctly, including when an operation is yielding.
 #[test]
 fn scoped_op_test() {
+    init_log();
     let owned = OwnedPool::new(OneChannelPool::new(
         4,
         VecDequeChannel::new()

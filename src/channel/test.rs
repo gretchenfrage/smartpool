@@ -1,6 +1,7 @@
 
 extern crate rand;
 extern crate stopwatch;
+extern crate pretty_env_logger;
 
 use ::prelude::*;
 use self::rand::prelude::*;
@@ -57,6 +58,8 @@ const BATCH_SIZE: usize = 1000;
 
 #[test]
 fn sdf_test() {
+    ::test::init_log();
+
     use self::sdf_pool::SdfPool;
 
     let seed = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
@@ -75,12 +78,12 @@ fn sdf_test() {
                 pool.pool.deadline.exec(op, moment);
             }
         });
-        println!("did batch {}", batch);
+        info!("did batch {}", batch);
     }
     let elapsed = timer.elapsed();
     let elapsed = elapsed.subsec_nanos() as u128 + elapsed.as_secs() as u128 * 1000000000;
     //let elapsed = timer.elapsed().subsec_nanos() as u128 + timer;
     let average = elapsed as f64 / (BATCHES * BATCH_SIZE) as f64;
     assert_eq!(atomic.load(Ordering::Acquire), BATCHES * BATCH_SIZE);
-    println!("average operation took {} ns", average);
+    info!("average operation took {} ns", average);
 }
