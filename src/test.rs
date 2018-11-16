@@ -35,12 +35,12 @@ impl<C: Channel + Exec + Send + Sync + 'static> PoolBehavior for OneChannelPool<
             threads: self.thread_count,
             schedule: self.schedule.clone(),
             levels: vec![
-                PriorityLevel(vec![
+                vec![
                     ChannelParams {
                         key: (),
                         complete_on_close: true
                     }
-                ])
+                ]
             ]
         }
     }
@@ -128,7 +128,7 @@ impl PoolBehavior for CompleteOnCloseTestPool {
             threads: 4,
             schedule: ScheduleAlgorithm::HighestFirst,
             levels: vec![
-                PriorityLevel(vec![
+                vec![
                     ChannelParams {
                         key: true,
                         complete_on_close: true
@@ -137,7 +137,7 @@ impl PoolBehavior for CompleteOnCloseTestPool {
                         key: false,
                         complete_on_close: false
                     }
-                ])
+                ]
             ]
         }
     }
@@ -272,7 +272,7 @@ impl PoolBehavior for MultiLevelPool {
             threads: 4,
             schedule: ScheduleAlgorithm::HighestFirst,
             levels: vec![
-                PriorityLevel(vec![
+                vec![
                     ChannelParams {
                         key: MultiLevelPoolChannel::Alpha1,
                         complete_on_close: false
@@ -281,14 +281,14 @@ impl PoolBehavior for MultiLevelPool {
                         key: MultiLevelPoolChannel::Alpha2,
                         complete_on_close: false
                     }
-                ]),
-                PriorityLevel(vec![
+                ],
+                vec![
                     ChannelParams {
                         key: MultiLevelPoolChannel::Beta,
                         complete_on_close: false
                     }
-                ]),
-                PriorityLevel(vec![
+                ],
+                vec![
                     ChannelParams {
                         key: MultiLevelPoolChannel::Gamma1,
                         complete_on_close: false
@@ -297,7 +297,7 @@ impl PoolBehavior for MultiLevelPool {
                         key: MultiLevelPoolChannel::Gamma2,
                         complete_on_close: false
                     }
-                ])
+                ]
             ]
         }
     }
@@ -491,12 +491,12 @@ impl PoolBehavior for TooManyBits {
             threads: 1,
             schedule: ScheduleAlgorithm::HighestFirst,
             levels: vec![
-                PriorityLevel(vec![
+                vec![
                     ChannelParams {
                         key: (),
                         complete_on_close: false
                     }
-                ])
+                ]
             ]
         }
     }
@@ -588,8 +588,12 @@ fn scoped_op_test() {
 }
 
 mod rrp {
+    use ::channel::{BitAssigner, NotEnoughBits};
+    use ::StatusBit;
     use ::prelude::setup::*;
     use time::Duration;
+    use atomic::*;
+    use std::sync::Arc;
 
     #[derive(Copy, Clone)]
     pub enum RoundRobinPoolKey {
@@ -598,17 +602,44 @@ mod rrp {
         C,
     }
 
+    /// this channel just produces the task of incrementing an atomic integer
+    pub struct AtomicIncrChannel {
+        pub int: Arc<Atomic<u128>>,
+    }
+    impl AtomicIncrChannel {
+        pub fn new() -> Self {
+            AtomicIncrChannel {
+                int: Arc::new(Atomic::new(0)),
+            }
+        }
+    }
+    impl Channel for AtomicIncrChannel {
+        fn assign_bits(&mut self, assigner: &mut BitAssigner) -> Result<(), NotEnoughBits> {
+            let mut bit = StatusBit::new();
+            assigner.assign(&mut bit)?;
+            bit.set(true);
+            Ok(())
+        }
+
+        fn poll(&self) -> Option<RunningTask> {
+            let int = self.int.clone();
+            Some(RunningTask::new(run(move || {
+                int.fetch_add(1, Ordering::SeqCst);
+            })))
+        }
+    }
+
     pub struct RoundRobinPool {
-        pub a: VecDequeChannel,
-        pub b: VecDequeChannel,
-        pub c: VecDequeChannel,
+        pub a: AtomicIncrChannel,
+        pub b: AtomicIncrChannel,
+        pub c: AtomicIncrChannel,
     }
     impl RoundRobinPool {
         pub fn new() -> Self {
             RoundRobinPool {
-                a: VecDequeChannel::new(),
-                b: VecDequeChannel::new(),
-                c: VecDequeChannel::new(),
+                a: AtomicIncrChannel::new(),
+                b: AtomicIncrChannel::new(),
+                c: AtomicIncrChannel::new(),
             }
         }
     }
@@ -624,18 +655,18 @@ mod rrp {
                     Duration::milliseconds(60),
                 ]),
                 levels: vec![
-                    PriorityLevel(vec![ChannelParams {
+                    vec![ChannelParams {
                         key: RoundRobinPoolKey::A,
                         complete_on_close: false,
-                    }]),
-                    PriorityLevel(vec![ChannelParams {
+                    }],
+                    vec![ChannelParams {
                         key: RoundRobinPoolKey::B,
                         complete_on_close: false,
-                    }]),
-                    PriorityLevel(vec![ChannelParams {
+                    }],
+                    vec![ChannelParams {
                         key: RoundRobinPoolKey::C,
                         complete_on_close: false,
-                    }])
+                    }]
                 ]
             }
         }
@@ -656,15 +687,13 @@ mod rrp {
             }
         }
 
-        fn followup(&self, from: RoundRobinPoolKey, task: RunningTask) {
-            match from {
-                RoundRobinPoolKey::A => self.a.submit(task),
-                RoundRobinPoolKey::B => self.b.submit(task),
-                RoundRobinPoolKey::C => self.c.submit(task),
-            }
+        fn followup(&self, _: RoundRobinPoolKey, _: RunningTask) {
+            unreachable!()
         }
     }
 }
+
+
 
 /// Tests that the round-robin time slicing is more or less correct.
 #[test]
@@ -675,37 +704,16 @@ fn test_slicing() {
     // create the round-robin pool
     let owned = OwnedPool::new(RoundRobinPool::new()).unwrap();
 
-    // and an atomic counter for each level
-    let a = Arc::new(Atomic::new(0u64));
-    let b = Arc::new(Atomic::new(0u64));
-    let c = Arc::new(Atomic::new(0u64));
-
-    // trigger recursively self-reproducing tasks
-    // enqueue a whole bunch of tasks, a task on each channel which increments its corresponding
-    // counter
-    for _ in 0..1000000 {
-        let a = a.clone();
-        let b = b.clone();
-        let c = c.clone();
-        owned.pool.a.exec(run(move || {
-            a.fetch_add(1, Ordering::SeqCst);
-        }));
-        owned.pool.b.exec(run(move || {
-            b.fetch_add(1, Ordering::SeqCst);
-        }));
-        owned.pool.c.exec(run(move || {
-            c.fetch_add(1, Ordering::SeqCst);
-        }));
-    }
+    let pool = owned.pool.clone();
 
     // wait a bit, then close the pool, which should cancel further tasks
     thread::sleep(StdDuration::from_secs(2));
     owned.close().wait().unwrap();
 
     // then, check if the time slices are more or less accurate
-    let a = a.load(Ordering::Acquire);
-    let b = b.load(Ordering::Acquire);
-    let c = c.load(Ordering::Acquire);
+    let a = pool.a.int.load(Ordering::Acquire);
+    let b = pool.b.int.load(Ordering::Acquire);
+    let c = pool.c.int.load(Ordering::Acquire);
     let total = a + b + c;
     info!("total tasks completed: {}, {}, {}", a, b, c);
 

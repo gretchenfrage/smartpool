@@ -133,8 +133,8 @@ pub struct PoolConfig<Behavior: PoolBehavior> {
     pub threads: u32,
     /// Schedule algorithm
     pub schedule: ScheduleAlgorithm,
-    /// Priority levels, from highest to lowest
-    pub levels: Vec<PriorityLevel<Behavior>>,
+    /// Priority levels, from highest to lowest, containing vecs of all the channels in that level
+    pub levels: Vec<Vec<ChannelParams<Behavior>>>,
 }
 
 /// Different schedules by which the thread pool can be configured to select between levels.
@@ -146,9 +146,6 @@ pub enum ScheduleAlgorithm {
     /// duration of time slice.
     RoundRobin(Vec<Duration>)
 }
-
-/// All the channels in a level
-pub struct PriorityLevel<Behavior: PoolBehavior>(pub Vec<ChannelParams<Behavior>>);
 
 /// Part of the pool config data which configured a certain pool-facing channel.
 pub struct ChannelParams<Behavior: PoolBehavior> {

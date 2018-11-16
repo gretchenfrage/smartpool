@@ -1,5 +1,5 @@
 
-use super::{PoolBehavior, PriorityLevel, ChannelToucher,
+use super::{PoolBehavior, ChannelToucher,
             ChannelToucherMut, RunningTask, ScheduleAlgorithm};
 use channel::{Channel, BitAssigner, NotEnoughBits};
 
@@ -125,7 +125,7 @@ impl<Behavior: PoolBehavior> OwnedPool<Behavior> {
         {
             let mut bit_assigner = BitAssigner::new(&present_field, &mut current_bit);
             // build each level, both normal and shutdown simultaneously
-            for &PriorityLevel(ref channel_param_vec) in &config.levels {
+            for channel_param_vec in &config.levels {
                 let mut level = Level {
                     mask: 0,
                     channel_index: Atomic::new(0),
@@ -629,7 +629,7 @@ mod run {
                     let task: RunningTask = *Box::from_raw(self.task);
                     self.pool.behavior.followup(self.from.key, task);
                 },
-                Ok(RunStatus::RequestedAndWillBeTakenCareOf) => (),
+                Ok(RunStatus::NotRequestedAndWillBeTakenCareOf) => (),
                 invalid => panic!("Invalid atomic followup CAS result: {:#?}", invalid)
             };
         }

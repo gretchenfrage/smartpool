@@ -32,10 +32,10 @@ mod sdf_pool {
             PoolConfig {
                 threads: 1,
                 schedule: ScheduleAlgorithm::HighestFirst,
-                levels: vec![PriorityLevel(vec![ChannelParams {
+                levels: vec![vec![ChannelParams {
                     key: (),
                     complete_on_close: false,
-                }])]
+                }]]
             }
         }
 
@@ -53,7 +53,7 @@ mod sdf_pool {
     }
 }
 
-const BATCHES: usize = 100;
+const BATCHES: usize = 1000;
 const BATCH_SIZE: usize = 1000;
 
 #[test]
@@ -85,5 +85,74 @@ fn sdf_test() {
     //let elapsed = timer.elapsed().subsec_nanos() as u128 + timer;
     let average = elapsed as f64 / (BATCHES * BATCH_SIZE) as f64;
     assert_eq!(atomic.load(Ordering::Acquire), BATCHES * BATCH_SIZE);
-    info!("average operation took {} ns", average);
+    info!("sdf average operation took {} ns", average);
+}
+
+mod fifo_pool {
+    use ::prelude::setup::*;
+
+    pub struct SdfPool {
+        pub channel: MultiChannel<VecDequeChannel>,
+    }
+    impl Default for SdfPool {
+        fn default() -> Self {
+            SdfPool {
+                channel: MultiChannel::new(16, VecDequeChannel::new),
+            }
+        }
+    }
+    impl PoolBehavior for SdfPool {
+        type ChannelKey = ();
+
+        fn config(&mut self) -> PoolConfig<Self> {
+            PoolConfig {
+                threads: 1,
+                schedule: ScheduleAlgorithm::HighestFirst,
+                levels: vec![vec![ChannelParams {
+                    key: (),
+                    complete_on_close: false,
+                }]]
+            }
+        }
+
+        fn touch_channel<O>(&self, _: (), mut toucher: impl ChannelToucher<O>) -> O {
+            toucher.touch(&self.channel)
+        }
+
+        fn touch_channel_mut<O>(&mut self, _: (), mut toucher: impl ChannelToucherMut<O>) -> O {
+            toucher.touch_mut(&mut self.channel)
+        }
+
+        fn followup(&self, _: (), task: RunningTask) {
+            self.channel.submit(task)
+        }
+    }
+}
+
+#[test]
+fn fifo_test() {
+    ::test::init_log();
+
+    use self::fifo_pool::SdfPool;
+
+    let pool = OwnedPool::new(SdfPool::default()).unwrap();
+    let atomic = Atomic::new(0usize);
+    let timer = Stopwatch::start_new();
+    for batch in 0..BATCHES {
+        scoped(|scope| {
+            for _ in 0..BATCH_SIZE {
+                let op = scope.work(|| {
+                    atomic.fetch_add(1, Ordering::SeqCst);
+                });
+                pool.pool.channel.exec(op);
+            }
+        });
+        info!("did batch {}", batch);
+    }
+    let elapsed = timer.elapsed();
+    let elapsed = elapsed.subsec_nanos() as u128 + elapsed.as_secs() as u128 * 1000000000;
+    //let elapsed = timer.elapsed().subsec_nanos() as u128 + timer;
+    let average = elapsed as f64 / (BATCHES * BATCH_SIZE) as f64;
+    assert_eq!(atomic.load(Ordering::Acquire), BATCHES * BATCH_SIZE);
+    info!("fifo average operation took {} ns", average);
 }

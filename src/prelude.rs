@@ -26,7 +26,6 @@ pub mod setup {
     pub use ::{
         PoolBehavior,
         PoolConfig,
-        PriorityLevel,
         ChannelParams,
         ChannelToucher,
         ChannelToucherMut,
@@ -38,6 +37,7 @@ pub mod setup {
     };
     pub use channel::{
         VecDequeChannel,
+        ShortestDeadlineFirst,
         MultiChannel,
         Exec,
         ExecParam,
