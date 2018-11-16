@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Phoenix <kahlo.phoenix@gmail.com>"]
 description = "A very customizable, future-aware threadpool."
 readme = "README.md"
-repository = "repository = https://github.com/gretchenfrage/smartpool"
+repository = "https://github.com/gretchenfrage/smartpool"
 categories = ["concurrency"]
 license = "MIT"
 
