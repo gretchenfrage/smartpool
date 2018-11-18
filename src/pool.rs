@@ -630,6 +630,9 @@ mod run {
                     self.pool.behavior.followup(self.from.key, task);
                 },
                 Ok(RunStatus::NotRequestedAndWillBeTakenCareOf) => (),
+                Err(RunStatus::RequestedAndWillBeTakenCareOf) => {
+                    warn!("same task was notified twice");
+                }
                 invalid => panic!("Invalid atomic followup CAS result: {:#?}", invalid)
             };
         }

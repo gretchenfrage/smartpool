@@ -7,6 +7,7 @@ use atomicmonitor::{AtomMonitor, Ordering};
 use std::mem;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::atomic::fence;
 
 use futures::Future;
 
@@ -42,8 +43,15 @@ impl<'env> Scope<'env> {
     /// Wrap a non-static future into a static-future (which will block this scoped batch
     /// stack frame), allowing that future to be submitted to a threadpool.
     #[must_use]
-    pub fn wrap<'scope>(&'scope self, future: impl Future<Item=(), Error=()> + Send + 'env)
+    pub fn wrap<'scope, F: Future<Item=(), Error=()> + Send + 'env>(
+        &'scope self, future_factory: impl FnOnce() -> F)
         -> Box<dyn Future<Item=(), Error=()> + Send + 'static> {
+        // if we don't fence, then when optimizations are enabled, strange things will happen
+        // with regard to caching captured local variables which are copy
+        fence(Ordering::SeqCst);
+
+        // now that we've fenced, we can create the future
+        let future = future_factory();
 
         self.running_count.mutate(|count| {
             count.fetch_add(1, Ordering::SeqCst);
@@ -68,9 +76,8 @@ impl<'env> Scope<'env> {
 
     /// A convenience utility for wrapping some pure, non-blocking work.
     #[must_use]
-    pub fn work<'scope>(&'scope self, work: impl FnOnce() -> () + Send + 'env)
+    pub fn work<'scope>(&'scope self, work: impl FnOnce() + Send + 'env)
                         -> Box<dyn Future<Item=(), Error=()> + Send + 'static> {
-
-        self.wrap(run::run(work))
+        self.wrap(move || run::run(work))
     }
 }

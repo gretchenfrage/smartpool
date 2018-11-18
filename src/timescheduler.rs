@@ -85,7 +85,8 @@ impl TimeScheduler {
     pub fn at(&self, moment: SteadyTime) -> FutureMoment {
         FutureMoment {
             scheduler: Some(self.clone()),
-            moment
+            moment,
+            requested_notify: false,
         }
     }
 
@@ -93,7 +94,8 @@ impl TimeScheduler {
     pub fn after(&self, delay: Duration) -> FutureMoment {
         FutureMoment {
             scheduler: Some(self.clone()),
-            moment: SteadyTime::now() + delay
+            moment: SteadyTime::now() + delay,
+            requested_notify: false,
         }
     }
 
@@ -218,6 +220,7 @@ impl<E: ExecParam + Send + 'static> Submit for SubmitExecParam<E>
 pub struct FutureMoment {
     scheduler: Option<TimeScheduler>,
     moment: SteadyTime,
+    requested_notify: bool,
 }
 impl Future for FutureMoment {
     type Item = ();
@@ -227,8 +230,11 @@ impl Future for FutureMoment {
         if SteadyTime::now() >= self.moment {
             Ok(Async::Ready(()))
         } else {
-            if let Some(scheduler) = self.scheduler.take() {
-                scheduler.insert(self.moment, ScheduledEvent::Notify(task::current()));
+            if !self.requested_notify {
+                self.requested_notify = true;
+                if let Some(scheduler) = self.scheduler.take() {
+                    scheduler.insert(self.moment, ScheduledEvent::Notify(task::current()));
+                }
             }
             Ok(Async::NotReady)
         }
@@ -250,7 +256,6 @@ impl Stream for PeriodicMoments {
             self.current = self.current + self.period;
             Ok(Async::Ready(Some(())))
         } else {
-            self.scheduler.insert(self.current,ScheduledEvent::Notify(task::current()));
             self.scheduler.insert(self.current,ScheduledEvent::Notify(task::current()));
             Ok(Async::NotReady)
         }
