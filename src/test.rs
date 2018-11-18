@@ -10,8 +10,10 @@ use std::thread;
 
 use time::{SteadyTime, Duration};
 use futures::prelude::*;
+use atomicmonitor::AtomMonitor;
 use atomicmonitor::atomic::{Atomic, Ordering};
 use monitor::Monitor;
+
 
 static INIT_LOG: Once = ONCE_INIT;
 pub fn init_log() {
@@ -85,6 +87,51 @@ fn simple_threadpool_test() {
         *guard
     });
     assert_eq!(result, 100);
+}
+
+#[test]
+fn push_future_test() {
+    init_log();
+
+    fn pool() -> Arc<Pool<OneChannelPool<VecDequeChannel>>> {
+        let owned = OwnedPool::new(OneChannelPool {
+            thread_count: 8,
+            schedule: ScheduleAlgorithm::HighestFirst,
+            channel: VecDequeChannel::new()
+        }).unwrap();
+        owned.pool.clone()
+    }
+
+    let pool_1 = pool();
+    let pool_2 = pool();
+    let scheduler = TimeScheduler::new();
+
+    let later = scheduler.periodically(SteadyTime::now(), Duration::milliseconds(100))
+        .take(10)
+        .into_future()
+        .map_err(|_| ())
+        .map(|_| "hello world");
+
+    let atomic_0 = Arc::new(AtomMonitor::new(0));
+    let atomic_1 = atomic_0.clone();
+
+    let triggered = pool_1.channel.exec_push(later)
+        .map(move |string| {
+            if string == "hello world" {
+                atomic_1.set(1);
+            } else {
+                atomic_1.set(-1);
+            }
+        });
+    pool_2.channel.exec(triggered);
+
+    match atomic_0.wait_until_timeout(|n| n != 0, Duration::seconds(2)) {
+        None => panic!("timed out"),
+        Some(1) => (),
+        Some(-1) => panic!("failed to communicate correctly"),
+        other => unreachable!("invalid {:?}", other),
+    };
+
 }
 
 /// Tests that the threadpool can execute a series of tasks with the round robin scheduler.

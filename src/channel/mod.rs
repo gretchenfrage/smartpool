@@ -6,6 +6,8 @@ mod test;
 pub use self::sdf::ShortestDeadlineFirst;
 
 use super::{StatusBit, RunningTask};
+use super::push::push_future;
+use super::push::PushFutureRecv;
 
 use std::sync::{Mutex, RwLock, Arc};
 use std::collections::VecDeque;
@@ -62,10 +64,21 @@ pub struct NotEnoughBits;
 
 /// Trait for channels for which a task can be submitted.
 pub trait Exec {
+    /// Execute a future on this channel.
     fn exec(&self, future: impl Future<Item=(), Error=()> + Send + 'static) {
         self.submit(RunningTask::new(future));
     }
 
+    /// Execute a future on this channel, and push the result to a push future.
+    fn exec_push<I: Send + 'static, E: Send + 'static>(&self,
+                                                       future: impl Future<Item=I, Error=E> + Send + 'static)
+        -> PushFutureRecv<I, E> {
+        let (send, recv) = push_future(future);
+        self.submit(RunningTask::new(send));
+        recv
+    }
+
+    /// Submit a raw running task.
     fn submit(&self, task: RunningTask);
 }
 
@@ -73,10 +86,22 @@ pub trait Exec {
 pub trait ExecParam {
     type Param;
 
+    /// Execute a future on this channel.
     fn exec(&self, future: impl Future<Item=(), Error=()> + Send + 'static, param: Self::Param) {
         self.submit(RunningTask::new(future), param);
     }
 
+    /// Execute a future on this channel, and push the result to a push future.
+    fn exec_push<I: Send + 'static, E: Send + 'static>(&self,
+                                                       future: impl Future<Item=I, Error=E> + Send + 'static,
+                                                       param: Self::Param)
+        -> PushFutureRecv<I, E> {
+        let (send, recv) = push_future(future);
+        self.submit(RunningTask::new(send), param);
+        recv
+    }
+
+    /// Submit a raw running task.
     fn submit(&self, task: RunningTask, param: Self::Param);
 }
 

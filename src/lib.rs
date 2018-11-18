@@ -14,6 +14,7 @@ extern crate time;
 extern crate smallqueue;
 extern crate atomic;
 extern crate stopwatch;
+extern crate through;
 
 pub mod channel;
 pub mod pool;
@@ -23,6 +24,7 @@ pub mod scoped;
 pub mod timescheduler;
 #[cfg(test)]
 pub mod test;
+pub mod push;
 
 use channel::Channel;
 
