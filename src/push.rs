@@ -1,13 +1,5 @@
 
-/// Push futures are futures based on interior mutability and shared memory, where one
-/// tasks produces a value, and sends it to another task. This is generally less
-/// efficient that the normal way in which Rust's futures ecosystem occurs. The purpose
-/// of this module is not to become a normal way of executing futures. Rather, this
-/// module is created to allow for tasks which execute across several channels, or
-/// even several pools, or with internal forking and concurrency.
-///
-/// Instead of using this module directly, simply use the `exec_push` method in
-/// `Exec` and `ExecParam`.
+
 
 use futures::prelude::*;
 use futures::task::Task;
@@ -101,6 +93,15 @@ impl<I, E, F: Future<Item=I, Error=E>> Future for PushFutureSend<I, E, F> {
     }
 }
 
+/// Push futures are futures based on interior mutability and shared memory, where one
+/// tasks produces a value, and sends it to another task. This is generally less
+/// efficient that the normal way in which Rust's futures ecosystem occurs. The purpose
+/// of this module is not to become a normal way of executing futures. Rather, this
+/// module is created to allow for tasks which execute across several channels, or
+/// even several pools, or with internal forking and concurrency.
+///
+/// Instead of using this module directly, simply use the `exec_push` method in
+/// `Exec` and `ExecParam`.
 pub fn push_future<I, E, F: Future<Item=I, Error=E>>(source: F) -> (PushFutureSend<I, E, F>, PushFutureRecv<I, E>) {
     let interior = PushFutureInterior::Unavailable {
         listeners: Vec::new()
