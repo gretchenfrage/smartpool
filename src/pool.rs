@@ -528,6 +528,14 @@ fn close<Behavior: PoolBehavior>(pool: Arc<Pool<Behavior>>) {
                 // else, do another find task pass
             };
 
+            match (
+                task.spawn.get_ref().canary_1,
+                task.spawn.get_ref().canary_2
+            ) {
+                (0xDEADBEEFDEADBEEF, 0xFEFEFEFEFEFEFEFE) => (),
+                (a, b) => error!("canaries mutated: ({:x}, {:x})", a, b),
+            };
+
             // now that a task was successfully acquired, run it, then repeat
             run::run(&pool, task, from);
         }
@@ -546,6 +554,17 @@ mod run {
     ) {
         unsafe {
             let task: *mut RunningTask = Box::into_raw(Box::new(task));
+
+            match (
+                (*task).spawn.get_ref().canary_1,
+                (*task).spawn.get_ref().canary_2
+                ) {
+                (0xDEADBEEFDEADBEEF, 0xFEFEFEFEFEFEFEFE) => (),
+                (a, b) => error!("canaries mutated: ({:x}, {:x})", a, b),
+            };
+
+            debug!("allocated future at {:p}", task);
+
             run_helper(pool, task, from)
         };
     }
@@ -555,17 +574,28 @@ mod run {
         task: *mut RunningTask,
         from: ChannelIdentifier<Behavior::ChannelKey>,
     ) {
-        let status: Arc<Atomic<RunStatus>> = Arc::new(Atomic::new(RunStatus::NotRequestedAndWillBeTakenCareOf));
-        match (&mut*task).spawn.poll_future_notify(&IntoAtomicFollowup {
+        //let status: Arc<Atomic<RunStatus>> = Arc::new(Atomic::new(ResponsibilityStatus::NotRequestedAndWillBeTakenCareOf));
+        let status: Arc<RunStatus> = Arc::new(RunStatus {
+            responsibility: Atomic::new(ResponsibilityStatus::NotRequestedAndWillBeTakenCareOf),
+            reinserted: Atomic::new(false),
+        });
+        match (
+            (*task).spawn.get_ref().canary_1,
+            (*task).spawn.get_ref().canary_2
+        ) {
+            (0xDEADBEEFDEADBEEF, 0xFEFEFEFEFEFEFEFE) => (),
+            (a, b) => error!("canaries mutated: ({:x}, {:x})", a, b),
+        };
+        match (*task).spawn.poll_future_notify(&IntoAtomicFollowup {
             pool,
             from,
             status: &status,
             task
         }, 0) {
             Ok(Async::NotReady) => {
-                match status.compare_exchange(
-                    RunStatus::NotRequestedAndWillBeTakenCareOf,
-                    RunStatus::NotRequestedAndWillNotBeTakenCareOf,
+                match status.responsibility.compare_exchange(
+                    ResponsibilityStatus::NotRequestedAndWillBeTakenCareOf,
+                    ResponsibilityStatus::NotRequestedAndWillNotBeTakenCareOf,
                     Ordering::SeqCst, Ordering::SeqCst
                 ) {
                     Ok(_) => {
@@ -580,7 +610,7 @@ mod run {
                             }
                         }
                     },
-                    Err(RunStatus::RequestedAndWillBeTakenCareOf) => {
+                    Err(ResponsibilityStatus::RequestedAndWillBeTakenCareOf) => {
                         // recurse
                         run_helper(pool, task, from);
                     },
@@ -600,39 +630,104 @@ mod run {
                     }
                 }
                 mem::drop(Box::from_raw(task));
+
+                /*
+                // complete, so attempt to drop it
+                unsafe fn drop_task<Behavior: PoolBehavior>(task: *mut RunningTask, pool: &Arc<Pool<Behavior>>) {
+                    if (&*task).close_counted.load(Ordering::Acquire) {
+                        pool.close_counter.mutate(|counter| {
+                            counter.fetch_sub(1, Ordering::SeqCst);
+                        });
+                        // if we're closing, notify the present field, so that the worker can unblock
+                        // if it's waiting to close for externally satisfied conditions
+                        if pool.lifecycle_state.load(Ordering::Acquire) == LifecycleState::Closed {
+                            pool.present_field.notify_all();
+                        }
+                    }
+                    // TODO: the thing
+                    use std::ptr;
+                    ptr::drop_in_place(task);
+                    //mem::drop(Box::from_raw(task));
+                }
+
+                // attempt to claim the status, to prevent the AtomicFollowup duplication bug
+                // TODO: is this necessary
+                match status.responsibility.compare_exchange(
+                    ResponsibilityStatus::NotRequestedAndWillBeTakenCareOf,
+                    ResponsibilityStatus::RequestedAndWillBeTakenCareOf,
+                    Ordering::SeqCst, Ordering::SeqCst,
+                ) {
+                    Ok(_) => {
+                        // future completed under normal conditions. drop it.
+                        debug!("dropping future: {:p}", task);
+                        drop_task(task, pool);
+                    },
+                    Err(ResponsibilityStatus::RequestedAndWillBeTakenCareOf) => {
+                        debug!("dropping future (strange: it was notified): {:p}", task);
+                        drop_task(task, pool);
+                    },
+                    Err(other) => panic!("Illegal run status upon finish: {:?}", other),
+                };
+
+                //if status.swap(ResponsibilityStatus::RequestedAndWillBeTakenCareOf, Ordering::SeqCst) != ResponsibilityStatus::NotRequestedAndWillNot
+                */
             }
         };
     }
 
     #[repr(u8)]
     #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-    enum RunStatus {
+    enum ResponsibilityStatus {
         NotRequestedAndWillBeTakenCareOf,
         RequestedAndWillBeTakenCareOf,
-        NotRequestedAndWillNotBeTakenCareOf
+        NotRequestedAndWillNotBeTakenCareOf,
+    }
+
+    struct RunStatus {
+        responsibility: Atomic<ResponsibilityStatus>,
+        reinserted: Atomic<bool>,
     }
 
     pub struct AtomicFollowup<Behavior: PoolBehavior> {
         pool: Arc<Pool<Behavior>>,
         from: ChannelIdentifier<Behavior::ChannelKey>,
-        status: Arc<Atomic<RunStatus>>,
+        status: Arc<RunStatus>,
         task: *mut RunningTask
     }
     impl<Behavior: PoolBehavior> Notify for AtomicFollowup<Behavior> {
         fn notify(&self, _: usize) {
-            match self.status.compare_exchange(
-                RunStatus::NotRequestedAndWillBeTakenCareOf,
-                RunStatus::RequestedAndWillBeTakenCareOf,
+            match self.status.responsibility.compare_exchange(
+                ResponsibilityStatus::NotRequestedAndWillBeTakenCareOf,
+                ResponsibilityStatus::RequestedAndWillBeTakenCareOf,
                 Ordering::SeqCst, Ordering::SeqCst
             ) {
-                Err(RunStatus::NotRequestedAndWillNotBeTakenCareOf) => unsafe {
-                    let task: RunningTask = *Box::from_raw(self.task);
+                Err(ResponsibilityStatus::NotRequestedAndWillNotBeTakenCareOf) => unsafe {
+                    if !self.status.reinserted.swap(true, Ordering::SeqCst) {
+                        debug!("taking future from heap: {:p}", self.task);
+
+                        /*
+                        use std::ptr;
+                        let task: RunningTask = ptr::read(self.task);
+                        */
+                        let task: RunningTask = *Box::from_raw(self.task);
+
+                        self.pool.behavior.followup(self.from.key, task);
+                    }
+
+                    /*
+                    // TODO: worry point 1
+                    debug!("taking future from heap (NRAWBTCO -> NRAWNBTCO): {:p}", self.task);
+
+                    // TODO: the thing
+                    use std::ptr;
+                    let task: RunningTask = ptr::read(self.task);
+                    //let task: RunningTask = *Box::from_raw(self.task);
+
                     self.pool.behavior.followup(self.from.key, task);
+                    */
                 },
-                Ok(RunStatus::NotRequestedAndWillBeTakenCareOf) => (),
-                Err(RunStatus::RequestedAndWillBeTakenCareOf) => {
-                    warn!("same task was notified twice");
-                }
+                Ok(ResponsibilityStatus::NotRequestedAndWillBeTakenCareOf) => (),
+                Err(ResponsibilityStatus::RequestedAndWillBeTakenCareOf) => (),
                 invalid => panic!("Invalid atomic followup CAS result: {:#?}", invalid)
             };
         }
@@ -643,7 +738,7 @@ mod run {
     pub struct IntoAtomicFollowup<'a, 'b, Behavior: PoolBehavior> {
         pool: &'a Arc<Pool<Behavior>>,
         from: ChannelIdentifier<Behavior::ChannelKey>,
-        status: &'b Arc<Atomic<RunStatus>>,
+        status: &'b Arc<RunStatus>,
         task: *mut RunningTask
     }
     impl<'a, 'b, Behavior: PoolBehavior> Into<NotifyHandle> for IntoAtomicFollowup<'a, 'b, Behavior> {

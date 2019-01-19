@@ -42,20 +42,55 @@ use time::Duration;
 
 /// The form a future exists in while it is being executed
 pub struct RunningTask {
-    pub spawn: Spawn<Box<dyn Future<Item=(), Error=()> + Send + 'static>>,
+    pub spawn: Spawn<Canary>,
     pub close_counted: Atomic<bool>,
 }
 impl RunningTask {
     fn new(future: impl Future<Item=(), Error=()> + Send + 'static) -> Self {
+        //let b = Box::new(future);
+
+        let future = future.fuse();
+
+        let canary = Canary {
+            canary_1: 0xDEADBEEFDEADBEEF,
+            canary_2: 0xFEFEFEFEFEFEFEFE,
+            future: Box::new(future),
+        };
+
         RunningTask {
-            spawn: spawn(Box::new(future)),
+            spawn: spawn(canary),
             close_counted: Atomic::new(false),
         }
+
     }
 }
 impl Debug for RunningTask {
     fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
         f.write_str("RunningTask")
+    }
+}
+
+use futures::prelude::*;
+
+pub struct Canary {
+    canary_1: usize,
+    canary_2: usize,
+    future: Box<dyn Future<Item=(), Error=()> + Send + 'static>,
+}
+
+impl Future for Canary {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        match (
+            self.canary_1,
+            self.canary_2
+        ) {
+            (0xDEADBEEFDEADBEEF, 0xFEFEFEFEFEFEFEFE) => (),
+            (a, b) => error!("canaries mutated: ({:x}, {:x})", a, b),
+        };
+        self.future.poll()
     }
 }
 

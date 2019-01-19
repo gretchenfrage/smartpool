@@ -622,7 +622,6 @@ fn scoped_op_test() {
     let atom = Atomic::new(0usize);
     scoped(|s| {
         for i in 0..1000 {
-            debug!("triggering {}", i);
             let future = s.wrap(|| scheduler
                 .after(Duration::seconds(1))
                 .map(|()| {
