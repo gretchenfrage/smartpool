@@ -1,16 +1,15 @@
 [package]
 name = "smartpool"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Phoenix <kahlo.phoenix@gmail.com>"]
 description = "A very customizable, future-aware threadpool."
 readme = "README.md"
 repository = "https://github.com/gretchenfrage/smartpool"
 categories = ["concurrency"]
 license = "MIT"
-publish = false
 
 [dependencies]
-futures = "0.1.24"
+futures = "0.1.25"
 atom = "0.3.5"
 atomicmonitor = "0.1.2"
 monitor = "0.1.0"
