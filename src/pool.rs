@@ -546,6 +546,7 @@ mod run {
     ) {
         unsafe {
             let task: *mut RunningTask = Box::into_raw(Box::new(task));
+
             run_helper(pool, task, from)
         };
     }
@@ -555,17 +556,20 @@ mod run {
         task: *mut RunningTask,
         from: ChannelIdentifier<Behavior::ChannelKey>,
     ) {
-        let status: Arc<Atomic<RunStatus>> = Arc::new(Atomic::new(RunStatus::NotRequestedAndWillBeTakenCareOf));
-        match (&mut*task).spawn.poll_future_notify(&IntoAtomicFollowup {
+        let status: Arc<RunStatus> = Arc::new(RunStatus {
+            responsibility: Atomic::new(ResponsibilityStatus::NotRequestedAndWillBeTakenCareOf),
+            reinserted: Atomic::new(false),
+        });
+        match (*task).spawn.poll_future_notify(&IntoAtomicFollowup {
             pool,
             from,
             status: &status,
             task
         }, 0) {
             Ok(Async::NotReady) => {
-                match status.compare_exchange(
-                    RunStatus::NotRequestedAndWillBeTakenCareOf,
-                    RunStatus::NotRequestedAndWillNotBeTakenCareOf,
+                match status.responsibility.compare_exchange(
+                    ResponsibilityStatus::NotRequestedAndWillBeTakenCareOf,
+                    ResponsibilityStatus::NotRequestedAndWillNotBeTakenCareOf,
                     Ordering::SeqCst, Ordering::SeqCst
                 ) {
                     Ok(_) => {
@@ -580,7 +584,7 @@ mod run {
                             }
                         }
                     },
-                    Err(RunStatus::RequestedAndWillBeTakenCareOf) => {
+                    Err(ResponsibilityStatus::RequestedAndWillBeTakenCareOf) => {
                         // recurse
                         run_helper(pool, task, from);
                     },
@@ -606,33 +610,39 @@ mod run {
 
     #[repr(u8)]
     #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-    enum RunStatus {
+    enum ResponsibilityStatus {
         NotRequestedAndWillBeTakenCareOf,
         RequestedAndWillBeTakenCareOf,
-        NotRequestedAndWillNotBeTakenCareOf
+        NotRequestedAndWillNotBeTakenCareOf,
+    }
+
+    struct RunStatus {
+        responsibility: Atomic<ResponsibilityStatus>,
+        reinserted: Atomic<bool>,
     }
 
     pub struct AtomicFollowup<Behavior: PoolBehavior> {
         pool: Arc<Pool<Behavior>>,
         from: ChannelIdentifier<Behavior::ChannelKey>,
-        status: Arc<Atomic<RunStatus>>,
+        status: Arc<RunStatus>,
         task: *mut RunningTask
     }
     impl<Behavior: PoolBehavior> Notify for AtomicFollowup<Behavior> {
         fn notify(&self, _: usize) {
-            match self.status.compare_exchange(
-                RunStatus::NotRequestedAndWillBeTakenCareOf,
-                RunStatus::RequestedAndWillBeTakenCareOf,
+            match self.status.responsibility.compare_exchange(
+                ResponsibilityStatus::NotRequestedAndWillBeTakenCareOf,
+                ResponsibilityStatus::RequestedAndWillBeTakenCareOf,
                 Ordering::SeqCst, Ordering::SeqCst
             ) {
-                Err(RunStatus::NotRequestedAndWillNotBeTakenCareOf) => unsafe {
-                    let task: RunningTask = *Box::from_raw(self.task);
-                    self.pool.behavior.followup(self.from.key, task);
+                Err(ResponsibilityStatus::NotRequestedAndWillNotBeTakenCareOf) => unsafe {
+                    if !self.status.reinserted.swap(true, Ordering::SeqCst) {
+                        let task: RunningTask = *Box::from_raw(self.task);
+
+                        self.pool.behavior.followup(self.from.key, task);
+                    }
                 },
-                Ok(RunStatus::NotRequestedAndWillBeTakenCareOf) => (),
-                Err(RunStatus::RequestedAndWillBeTakenCareOf) => {
-                    warn!("same task was notified twice");
-                }
+                Ok(ResponsibilityStatus::NotRequestedAndWillBeTakenCareOf) => (),
+                Err(ResponsibilityStatus::RequestedAndWillBeTakenCareOf) => (),
                 invalid => panic!("Invalid atomic followup CAS result: {:#?}", invalid)
             };
         }
@@ -643,7 +653,7 @@ mod run {
     pub struct IntoAtomicFollowup<'a, 'b, Behavior: PoolBehavior> {
         pool: &'a Arc<Pool<Behavior>>,
         from: ChannelIdentifier<Behavior::ChannelKey>,
-        status: &'b Arc<Atomic<RunStatus>>,
+        status: &'b Arc<RunStatus>,
         task: *mut RunningTask
     }
     impl<'a, 'b, Behavior: PoolBehavior> Into<NotifyHandle> for IntoAtomicFollowup<'a, 'b, Behavior> {

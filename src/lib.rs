@@ -47,10 +47,13 @@ pub struct RunningTask {
 }
 impl RunningTask {
     fn new(future: impl Future<Item=(), Error=()> + Send + 'static) -> Self {
+        let future: Box<dyn Future<Item=(), Error=()> + Send + 'static> = Box::new(future);
+
         RunningTask {
-            spawn: spawn(Box::new(future)),
+            spawn: spawn(future),
             close_counted: Atomic::new(false),
         }
+
     }
 }
 impl Debug for RunningTask {

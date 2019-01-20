@@ -14,7 +14,7 @@ use futures::Future;
 /// Enter a batch of scoped operations, which allows non-static futures (which reference the stack
 /// frame) to be submitted to a threadpool in a memory-safe way, by preventing the calling stack
 /// frame from exiting until all futures in this scoped batch are completed.
-pub fn scoped<'env, R>(operation: impl FnOnce(&Scope<'env>) -> R) -> R {
+pub unsafe fn scoped<'env, R>(operation: impl FnOnce(&Scope<'env>) -> R) -> R {
     // create scope
     let scope = Scope {
         running_count: Arc::new(AtomMonitor::new(0)),
