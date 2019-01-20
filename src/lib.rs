@@ -62,8 +62,6 @@ impl Debug for RunningTask {
     }
 }
 
-use futures::prelude::*;
-
 /// A way for a channel to access the status bit of the pool, which it must maintain
 pub struct StatusBit {
     inner: Option<StatusBitInner>

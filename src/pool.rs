@@ -528,14 +528,6 @@ fn close<Behavior: PoolBehavior>(pool: Arc<Pool<Behavior>>) {
                 // else, do another find task pass
             };
 
-            match (
-                task.spawn.get_ref().canary_1,
-                task.spawn.get_ref().canary_2
-            ) {
-                (0xDEADBEEFDEADBEEF, 0xFEFEFEFEFEFEFEFE) => (),
-                (a, b) => error!("canaries mutated: ({:x}, {:x})", a, b),
-            };
-
             // now that a task was successfully acquired, run it, then repeat
             run::run(&pool, task, from);
         }
