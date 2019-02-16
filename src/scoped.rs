@@ -54,16 +54,16 @@ impl<'env> Scope<'env> {
         // now that we've fenced, we can create the future
         let future = future_factory();
 
-        let n = self.running_count.mutate(|count| {
+        self.running_count.mutate(|count| {
             count.fetch_add(1, Ordering::SeqCst)
-        }) + 1;
+        });
 
         let running_count = self.running_count.clone();
         let future = future
             .then(move |result| {
-                let n = running_count.mutate(|count| {
+                running_count.mutate(|count| {
                     count.fetch_sub(1, Ordering::SeqCst)
-                }) - 1;
+                });
                 result
             });
 
