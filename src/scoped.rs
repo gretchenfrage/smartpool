@@ -19,14 +19,16 @@ pub unsafe fn scoped<'env, R>(operation: impl FnOnce(&Scope<'env>) -> R) -> R {
     let scope = Scope {
         running_count: Arc::new(AtomMonitor::new(0)),
         not_static: PhantomData,
-        not_sendsync: PhantomData,
     };
 
     // trigger the futures
     let result = operation(&scope);
 
     // wait for future completion
-    scope.running_count.wait_until(|count| count == 0);
+    scope.running_count.wait_until(|count| {
+        debug!("count is currently {}", count);
+        count == 0
+    });
 
     // done
     result
@@ -37,7 +39,6 @@ pub unsafe fn scoped<'env, R>(operation: impl FnOnce(&Scope<'env>) -> R) -> R {
 pub struct Scope<'env> {
     running_count: Arc<AtomMonitor<usize>>,
     not_static: PhantomData<&'env ()>,
-    not_sendsync: PhantomData<*const ()>,
 }
 impl<'env> Scope<'env> {
     /// Wrap a non-static future into a static-future (which will block this scoped batch
@@ -53,17 +54,17 @@ impl<'env> Scope<'env> {
         // now that we've fenced, we can create the future
         let future = future_factory();
 
-        self.running_count.mutate(|count| {
-            count.fetch_add(1, Ordering::SeqCst);
-        });
+        let n = self.running_count.mutate(|count| {
+            count.fetch_add(1, Ordering::SeqCst)
+        }) + 1;
 
         let running_count = self.running_count.clone();
         let future = future
-            .then(move |_| {
-                running_count.mutate(|count| {
-                    count.fetch_sub(1, Ordering::SeqCst);
-                });
-                Ok(())
+            .then(move |result| {
+                let n = running_count.mutate(|count| {
+                    count.fetch_sub(1, Ordering::SeqCst)
+                }) - 1;
+                result
             });
 
         let future: Box<dyn Future<Item=(), Error=()> + Send + 'env> =

@@ -619,22 +619,23 @@ fn scoped_op_test() {
     }).unwrap();
     let scheduler = TimeScheduler::new();
 
-    let atom = Atomic::new(0usize);
-    scoped(|s| {
-        for i in 0..1000 {
-            let future = s.wrap(|| scheduler
-                .after(Duration::seconds(1))
-                .map(|()| {
-                    atom.fetch_add(1, Ordering::SeqCst);
-                })
-                .fuse()
-                .map(move |()| debug!("after delay {}", i)));
-            owned.pool.channel.exec(future);
-        }
-    });
-    let value = atom.load(Ordering::Acquire);
-
-    assert_eq!(value, 1000);
+    unsafe {
+        let atom = Atomic::new(0usize);
+        scoped(|s| {
+            for i in 0..1000 {
+                let future = s.wrap(|| scheduler
+                    .after(Duration::seconds(1))
+                    .map(|()| {
+                        atom.fetch_add(1, Ordering::SeqCst);
+                    })
+                    .fuse()
+                    .map(move |()| debug!("after delay {}", i)));
+                owned.pool.channel.exec(future);
+            }
+        });
+        let value = atom.load(Ordering::Acquire);
+        assert_eq!(value, 1000);
+    }
 }
 
 mod rrp {
