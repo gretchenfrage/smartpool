@@ -33,7 +33,7 @@ impl<O, E, F: FnOnce() -> Result<O, E>> Future for TryRun<O, E, F> {
     }
 }
 
-pub fn try<O, E, F: FnOnce() -> Result<O, E>>(work: F) -> TryRun<O, E, F> {
+pub fn try_run<O, E, F: FnOnce() -> Result<O, E>>(work: F) -> TryRun<O, E, F> {
     TryRun {
         work: Some(work)
     }

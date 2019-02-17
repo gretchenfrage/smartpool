@@ -12,7 +12,7 @@ pub use channel::{
 pub use timescheduler::TimeScheduler;
 pub use run::{
     run,
-    try
+    try_run
 };
 pub use scoped::{
     scoped,
